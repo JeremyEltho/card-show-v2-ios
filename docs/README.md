@@ -1,4 +1,4 @@
-# PokeScan v2
+# CardShow Pro v2
 
 Production-grade Pokémon card scanning and inventory platform.
 
@@ -10,7 +10,7 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # fill in API keys
-alembic upgrade head           # creates pokescan.db
+alembic upgrade head           # creates cardshowpro.db
 python seed.py                 # demo user + 5 sample cards
 uvicorn main:app --reload --port 8000
 ```
@@ -19,13 +19,13 @@ API docs: http://localhost:8000/docs
 
 ### iOS App
 ```
-open ios/PokeScan.xcodeproj
+open ios/CardShowPro.xcodeproj
 # Select iPhone 17 Pro simulator
 # Cmd+R to build and run
 ```
 
 ## Demo Credentials
-- Email: `demo@pokescan.com`
+- Email: `demo@cardshowpro.com`
 - Password: `pokemon123`
 
 ## API Keys Required
@@ -73,8 +73,8 @@ v2/
 │   ├── tests/             pytest suite (12 tests)
 │   └── seed.py            demo data
 ├── ios/
-│   ├── PokeScan.xcodeproj
-│   └── PokeScan/
+│   ├── CardShowPro.xcodeproj
+│   └── CardShowPro/
 │       ├── App/           entry point + AppState
 │       ├── Views/         Scanner, Inventory, Analytics, Auth, Settings
 │       ├── ViewModels/    @Observable MVVM
