@@ -67,24 +67,40 @@ actor CardScannerService: NSObject {
 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
 
-        // Stage 1: Detect card rectangle
-        guard let cardRect = await detectCardRectangle(in: ciImage) else {
-            let d = delegate
-            await MainActor.run { d?.scannerDidUpdateOverlay(rect: nil, in: .zero) }
-            return
+        // Stage 1: Try rectangle detection (works well on clean backgrounds).
+        // If it fails (cluttered desk, keyboard backdrop, low contrast), DON'T bail —
+        // fall through and OCR the area corresponding to the on-screen guide frame.
+        let cardRect = await detectCardRectangle(in: ciImage)
+        let d = delegate
+        await MainActor.run { d?.scannerDidUpdateOverlay(rect: cardRect?.boundingBox, in: .zero) }
+
+        // Stage 2: Build the OCR region.
+        //   - With a detection: perspective-correct → crop title band
+        //   - Without one: just crop the top 35% of the camera frame (the user is
+        //     instructed to fit the card inside the on-screen guide, so the card name
+        //     should land in roughly that region)
+        let ocrImage: CIImage
+        if let rect = cardRect {
+            let corrected = ImagePreprocessor.perspectiveCorrect(ciImage, rect: rect)
+            ocrImage = ImagePreprocessor.cropTitleBand(corrected)
+        } else {
+            // Crop the central card-shaped band of the frame where the user is told
+            // to place the card. Top portion gets us the card name.
+            let ext = ciImage.extent
+            let band = CGRect(
+                x: ext.midX - ext.width * 0.35,
+                y: ext.midY + ext.height * 0.05,
+                width: ext.width * 0.70,
+                height: ext.height * 0.20
+            )
+            ocrImage = ciImage.cropped(to: band)
         }
+        let enhanced = ImagePreprocessor.enhanceContrast(ocrImage)
 
-        // Stage 2: Perspective correction
-        let corrected = ImagePreprocessor.perspectiveCorrect(ciImage, rect: cardRect)
-
-        // Stage 3: Crop title band + enhance
-        let titleBand = ImagePreprocessor.cropTitleBand(corrected)
-        let enhanced = ImagePreprocessor.enhanceContrast(titleBand)
-
-        // Stage 4: OCR
+        // Stage 3: OCR
         guard let ocrText = await recognizeText(in: enhanced), !ocrText.isEmpty else { return }
 
-        // Stage 5: On-device fuzzy match against bundled canonical dictionary (5,437 names)
+        // Stage 4: On-device fuzzy match against bundled canonical dictionary (5,437 names)
         guard let localMatch = FuzzyMatcher.shared.match(ocrText) else { return }
 
         // Stage 6: Look up full metadata + market price from pokemontcg.io directly.
@@ -107,16 +123,23 @@ actor CardScannerService: NSObject {
         await withCheckedContinuation { continuation in
             let request = VNDetectRectanglesRequest { req, _ in
                 let observations = req.results as? [VNRectangleObservation] ?? []
+                // Filter for card-shaped rectangles (portrait, 1:1.4 ratio)
                 let card = observations.filter { ob in
-                    let ratio = ob.boundingBox.height / ob.boundingBox.width
-                    return (1.2...1.7).contains(ratio) && ob.confidence > 0.7
-                        && ob.boundingBox.width > 0.2 && ob.boundingBox.height > 0.2
+                    let h = ob.boundingBox.height, w = ob.boundingBox.width
+                    let ratio = h / w
+                    return (1.1...1.7).contains(ratio)
+                        && ob.confidence > 0.5
+                        && w > 0.15 && h > 0.20
                 }.max(by: { $0.confidence < $1.confidence })
                 continuation.resume(returning: card)
             }
             request.minimumAspectRatio = 0.55
             request.maximumAspectRatio = 0.85
             request.minimumSize = 0.15
+            // Critical: default is 1. Without this, Vision only returns the single
+            // best rectangle, which might be the laptop / table edge / keyboard,
+            // not the card. Allow up to 10 candidates and we'll filter for the card.
+            request.maximumObservations = 10
             try? VNImageRequestHandler(ciImage: image, options: [:]).perform([request])
         }
     }
@@ -124,9 +147,16 @@ actor CardScannerService: NSObject {
     private func recognizeText(in image: CIImage) async -> String? {
         await withCheckedContinuation { continuation in
             let request = VNRecognizeTextRequest { req, _ in
-                let text = (req.results as? [VNRecognizedTextObservation])?.first?
-                    .topCandidates(1).first?.string
-                continuation.resume(returning: text)
+                guard let observations = req.results as? [VNRecognizedTextObservation] else {
+                    continuation.resume(returning: nil); return
+                }
+                // Sort top-to-bottom (largest Y → smallest) and collect ALL recognised lines.
+                // The card name might not be the highest-confidence line; the candidate
+                // ranker in FuzzyMatcher picks the best one.
+                let lines = observations
+                    .sorted { $0.boundingBox.midY > $1.boundingBox.midY }
+                    .compactMap { $0.topCandidates(1).first?.string }
+                continuation.resume(returning: lines.joined(separator: "\n"))
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
