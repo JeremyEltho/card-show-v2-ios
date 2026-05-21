@@ -50,12 +50,15 @@ struct TransactionsView: View {
                     emptyState
                 } else {
                     ForEach(vm.filteredItems) { item in
-                        StockRow(item: item, onSell: { sellingItem = item })
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button("Delete", role: .destructive) {
-                                    Task { await vm.delete(item: item) }
-                                }
+                        NavigationLink(destination: CardDetailView(item: item, vm: vm)) {
+                            StockRow(item: item, onSell: { sellingItem = item })
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", role: .destructive) {
+                                Task { await vm.delete(item: item) }
                             }
+                        }
                     }
                 }
             }

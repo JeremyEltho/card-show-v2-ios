@@ -31,15 +31,11 @@ final class InventoryService {
             quantity: 1,
             purchasePrice: purchasePrice ?? card.marketPrice,
             salePrice: status == "sold" ? (purchasePrice ?? card.marketPrice) : nil,
+            marketPrice: card.marketPrice,
+            setName: card.setName,
             sourceLocation: sourceLocation.isEmpty ? nil : sourceLocation,
             acquiredAt: .now
         )
-        // Stash market price + set name in notes for later (poor-man's metadata)
-        if let market = card.marketPrice, let setName = card.setName {
-            item.notes = "market=\(market);set=\(setName)"
-        } else if let market = card.marketPrice {
-            item.notes = "market=\(market)"
-        }
         ctx.insert(item)
         try? ctx.save()
         return item
@@ -49,6 +45,31 @@ final class InventoryService {
         guard let ctx = modelContext else { return }
         item.status = "sold"
         item.salePrice = price
+        try? ctx.save()
+    }
+
+    /// Apply arbitrary field edits to an inventory item. Pass only the fields you
+    /// want to change; the rest stay untouched.
+    func update(
+        item: LocalInventoryItem,
+        status: String? = nil,
+        condition: String? = nil,
+        purchasePrice: Double? = nil,
+        salePrice: Double? = nil,
+        notes: String? = nil,
+        sourceLocation: String? = nil,
+        paymentMethod: String? = nil,
+        counterparty: String? = nil
+    ) {
+        guard let ctx = modelContext else { return }
+        if let status { item.status = status }
+        if let condition { item.condition = condition }
+        if let purchasePrice { item.purchasePrice = purchasePrice }
+        if let salePrice { item.salePrice = salePrice }
+        if let notes { item.notes = notes }
+        if let sourceLocation { item.sourceLocation = sourceLocation }
+        if let paymentMethod { item.paymentMethod = paymentMethod }
+        if let counterparty { item.counterparty = counterparty }
         try? ctx.save()
     }
 

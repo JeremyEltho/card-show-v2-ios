@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		021667AF92C218CCB780379A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5474E1C5FAD61BFD15F0684C /* Assets.xcassets */; };
 		02854EC4971BC567B877E97F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DB6EDB0AEA91337C26291B2 /* AppState.swift */; };
+		037E079A8B3891C486FFCF4C /* ScanSuccessOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51161787FA992BA71AD02E21 /* ScanSuccessOverlay.swift */; };
 		0AAA70EE3DFC26400CA31706 /* InventoryRowComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 713B17685D0BD6EFE4978503 /* InventoryRowComponents.swift */; };
 		13C3D402FF40135E9B7F7B80 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC1329EC686BAC7220286D2C /* HomeView.swift */; };
 		1D4B574C683037DBF0D21C73 /* InventoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56CE66AC80FA7D040CBF4148 /* InventoryViewModel.swift */; };
@@ -44,6 +45,7 @@
 		319BA377685C10256A018D89 /* ScanResultSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanResultSheet.swift; sourceTree = "<group>"; };
 		3E902078208F82D4C37342BF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		43EB3D943EBB8B1ABCAB214A /* CardOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardOverlayView.swift; sourceTree = "<group>"; };
+		51161787FA992BA71AD02E21 /* ScanSuccessOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanSuccessOverlay.swift; sourceTree = "<group>"; };
 		5474E1C5FAD61BFD15F0684C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		56CE66AC80FA7D040CBF4148 /* InventoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryViewModel.swift; sourceTree = "<group>"; };
 		574149CAD4D450217E2CA261 /* CardScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardScannerService.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				43EB3D943EBB8B1ABCAB214A /* CardOverlayView.swift */,
 				B2C85B764F8A92D1954812C7 /* ScannerView.swift */,
 				319BA377685C10256A018D89 /* ScanResultSheet.swift */,
+				51161787FA992BA71AD02E21 /* ScanSuccessOverlay.swift */,
 			);
 			path = Scanner;
 			sourceTree = "<group>";
@@ -324,6 +327,7 @@
 				2C7276F46713E31B0F7E6DF7 /* PokemonTCGService.swift in Sources */,
 				73D3B73194672AC0DA42664B /* ProfileView.swift in Sources */,
 				7855CFA3B1E8FE09001A219E /* ScanResultSheet.swift in Sources */,
+				037E079A8B3891C486FFCF4C /* ScanSuccessOverlay.swift in Sources */,
 				FA9E1C3798B6EDFE2CADA641 /* ScannerView.swift in Sources */,
 				D7AD28CA87E7B15D3E3A06F9 /* ScannerViewModel.swift in Sources */,
 				74508D7775131A71808C5A94 /* SwiftDataModels.swift in Sources */,

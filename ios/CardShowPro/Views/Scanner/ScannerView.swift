@@ -5,6 +5,7 @@ struct ScannerView: View {
     let logMode: LogMode
     @State private var vm = ScannerViewModel()
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
 
     init(logMode: LogMode = .buy) {
         self.logMode = logMode
@@ -28,16 +29,22 @@ struct ScannerView: View {
                 bottomHint
             }
 
-            // Auto-confirm success banner — slides up from bottom
-            if vm.undoAvailable, case .autoConfirmed(let match) = vm.scanState {
-                VStack {
-                    Spacer()
-                    autoConfirmBanner(match)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.bottom, 100)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: vm.undoAvailable)
+            // Success overlay — appears after every successful log.
+            // Vendor decides whether to scan more or go home.
+            if vm.didJustLog {
+                ScanSuccessOverlay(
+                    item: vm.lastLoggedCard,
+                    logMode: logMode,
+                    onDone: {
+                        vm.didJustLog = false
+                        vm.lastLoggedCard = nil
+                        dismiss()
+                    },
+                    onScanAnother: { vm.continueScanning() },
+                    onUndo: { Task { await vm.undoLastLog() } }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: vm.didJustLog)
             }
         }
         .sheet(isPresented: Binding(
@@ -134,55 +141,6 @@ struct ScannerView: View {
         }
     }
 
-    // MARK: - Auto-confirm banner
-
-    private func autoConfirmBanner(_ match: CardMatch) -> some View {
-        HStack(spacing: Theme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(Theme.Colors.greenSoft)
-                    .frame(width: 36, height: 36)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 16, weight: .heavy))
-                    .foregroundStyle(Theme.Colors.green)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("LOGGED")
-                    .font(Theme.Typography.label)
-                    .tracking(1)
-                    .foregroundStyle(Theme.Colors.green)
-                HStack(spacing: 6) {
-                    Text(match.name)
-                        .font(Theme.Typography.title)
-                        .foregroundStyle(Theme.Colors.textPrimary)
-                    if let price = match.marketPrice {
-                        Text(String(format: "$%.0f", price))
-                            .font(Theme.Typography.priceSm)
-                            .foregroundStyle(Theme.Colors.amber)
-                    }
-                }
-            }
-
-            Spacer()
-
-            Button {
-                Task { await vm.undoLastLog() }
-            } label: {
-                Text("UNDO")
-                    .font(Theme.Typography.label)
-                    .tracking(1)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Theme.Colors.redSoft))
-                    .foregroundStyle(Theme.Colors.red)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(Theme.Spacing.md)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
-    }
 }
 
 // MARK: - Camera preview UIViewRepresentable

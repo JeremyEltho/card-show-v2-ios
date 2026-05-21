@@ -27,11 +27,18 @@ final class ScannerViewModel: CardScannerDelegate {
     var cardOverlayRect: CGRect?
     var isLoggingToInventory = false
     var lastLoggedCard: LocalInventoryItem?
-    var undoAvailable = false
+
+    /// Set to true right after a successful log. Drives the success overlay.
+    /// The overlay then offers DONE / SCAN ANOTHER / UNDO.
+    var didJustLog: Bool = false
 
     /// Vendor action context — controls the default status when logging a scan,
     /// and what the ScanResultSheet pre-selects. Set by the calling view.
     var logMode: LogMode = .buy
+
+    /// While true, the scanner pauses detection — used between scans to avoid
+    /// instantly re-logging the same card before the user moves the phone.
+    var isPausedAfterLog: Bool = false
 
     private let scannerService = CardScannerService()
 
@@ -69,17 +76,17 @@ final class ScannerViewModel: CardScannerDelegate {
 
     @MainActor
     private func handleMatch(_ match: CardMatch) async {
+        // Ignore new detections while the success overlay is up or we're paused
+        guard !didJustLog, !isPausedAfterLog else { return }
+
         let confidence = match.confidence
 
         if confidence >= 0.95 {
             // Auto-confirm: log immediately using the current mode (buy/sell/trade)
             scanState = .autoConfirmed(match)
             await logCard(match, status: logMode.inventoryStatus, auto: true)
-            undoAvailable = true
-            // Reset after 3 seconds
-            try? await Task.sleep(for: .seconds(3))
-            undoAvailable = false
-            scanState = .scanning
+            // Show success overlay — the user decides DONE / SCAN ANOTHER / UNDO
+            didJustLog = true
 
         } else if confidence >= 0.80 {
             scanState = .awaitingConfirmation(match)
@@ -101,6 +108,8 @@ final class ScannerViewModel: CardScannerDelegate {
         if let price { enriched.marketPrice = price }
 
         await logCard(enriched, status: status, condition: condition, purchasePrice: price, sourceLocation: sourceLocation, auto: false)
+        // Sheet-driven confirms also raise the success overlay
+        didJustLog = true
         scanState = .scanning
     }
 
@@ -108,12 +117,28 @@ final class ScannerViewModel: CardScannerDelegate {
         scanState = .scanning
     }
 
+    /// Called by the success overlay's "SCAN ANOTHER" button. Clears the
+    /// just-logged flag and starts a short pause so the same card doesn't
+    /// immediately re-fire before the vendor moves the phone.
+    func continueScanning() {
+        didJustLog = false
+        lastLoggedCard = nil
+        scanState = .scanning
+        // Brief pause to give the user time to swap cards
+        isPausedAfterLog = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            isPausedAfterLog = false
+        }
+    }
+
     func undoLastLog() async {
         if let item = lastLoggedCard {
             await MainActor.run { InventoryService.shared.delete(item: item) }
         }
         lastLoggedCard = nil
-        undoAvailable = false
+        didJustLog = false
+        scanState = .scanning
     }
 
     // MARK: - Logging (local-only — no backend)

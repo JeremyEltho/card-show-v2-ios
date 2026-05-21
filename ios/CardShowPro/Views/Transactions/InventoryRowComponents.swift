@@ -96,24 +96,25 @@ struct StockRow: View {
 
 // MARK: - Notes metadata helpers
 
+// Prefer the dedicated columns; fall back to legacy notes parsing for any
+// items that were saved before we promoted these to proper fields.
+
 func extractMarketPrice(from item: LocalInventoryItem) -> Double? {
+    if let p = item.marketPrice { return p }
     guard let notes = item.notes else { return nil }
     for token in notes.split(separator: ";") {
         let parts = token.split(separator: "=", maxSplits: 1)
-        if parts.count == 2, parts[0] == "market" {
-            return Double(parts[1])
-        }
+        if parts.count == 2, parts[0] == "market" { return Double(parts[1]) }
     }
     return nil
 }
 
 func extractSetName(from item: LocalInventoryItem) -> String? {
+    if let s = item.setName, !s.isEmpty { return s }
     guard let notes = item.notes else { return nil }
     for token in notes.split(separator: ";") {
         let parts = token.split(separator: "=", maxSplits: 1)
-        if parts.count == 2, parts[0] == "set" {
-            return String(parts[1])
-        }
+        if parts.count == 2, parts[0] == "set" { return String(parts[1]) }
     }
     return nil
 }

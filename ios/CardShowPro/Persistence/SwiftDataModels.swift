@@ -12,8 +12,12 @@ final class LocalInventoryItem {
     var quantity: Int
     var purchasePrice: Double?
     var salePrice: Double?
-    var notes: String?
+    var marketPrice: Double?            // snapshotted at scan time
+    var setName: String?                 // snapshotted at scan time
+    var notes: String?                   // free-form vendor notes (user-editable)
     var sourceLocation: String?
+    var paymentMethod: String?
+    var counterparty: String?           // who I bought from / sold to
     var acquiredAt: Date
     var syncedToServer: Bool
     var serverItemId: String?
@@ -28,8 +32,12 @@ final class LocalInventoryItem {
         quantity: Int = 1,
         purchasePrice: Double? = nil,
         salePrice: Double? = nil,
+        marketPrice: Double? = nil,
+        setName: String? = nil,
         notes: String? = nil,
         sourceLocation: String? = nil,
+        paymentMethod: String? = nil,
+        counterparty: String? = nil,
         acquiredAt: Date = .now,
         syncedToServer: Bool = false,
         serverItemId: String? = nil
@@ -45,8 +53,12 @@ final class LocalInventoryItem {
         self.quantity = quantity
         self.purchasePrice = purchasePrice
         self.salePrice = salePrice
+        self.marketPrice = marketPrice
+        self.setName = setName
         self.notes = notes
         self.sourceLocation = sourceLocation
+        self.paymentMethod = paymentMethod
+        self.counterparty = counterparty
         self.acquiredAt = acquiredAt
         self.syncedToServer = syncedToServer
         self.serverItemId = serverItemId
