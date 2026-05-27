@@ -30,12 +30,6 @@ final class InventoryViewModel {
         isLoading = false
     }
 
-    /// Convenience — re-fetch matches the existing call site signature.
-    func loadNextPage() async { /* local store has no pagination */ }
-
-    var hasMore: Bool { false }
-    var isLoadingMore: Bool { false }
-
     func markSold(item: LocalInventoryItem, price: Double) async {
         service.markSold(item: item, price: price)
         await load()

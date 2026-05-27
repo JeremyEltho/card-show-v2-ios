@@ -20,6 +20,15 @@ struct CardDetailView: View {
     @State private var counterparty: String = ""
     @State private var notes: String = ""
     @State private var showDeleteConfirm = false
+    @State private var showSellSheet = false
+    @State private var receiptToast: ReceiptToast? = nil
+    /// Loaded once on appear so the disk-backed UIImage isn't fetched on every
+    /// keystroke in the price fields (each keystroke re-evaluates body).
+    @State private var capturedImage: UIImage? = nil
+
+    private enum ReceiptToast: Equatable {
+        case saved, failed(String)
+    }
 
     private let conditions = ["mint", "near_mint", "lightly_played", "moderately_played", "heavily_played", "damaged"]
     private let paymentMethods = ["", "Cash", "Venmo", "Zelle", "PayPal", "Card", "Trade"]
@@ -33,11 +42,13 @@ struct CardDetailView: View {
                 VStack(spacing: Theme.Spacing.md) {
                     heroImage
                     titleBlock
+                    if status == "bought" || status == "holding" {
+                        sellCTA
+                    }
                     statusPicker
                     priceSection
                     detailsSection
                     notesSection
-                    deleteButton
                 }
                 .padding(Theme.Spacing.md)
                 .padding(.bottom, Theme.Spacing.xl)
@@ -54,7 +65,50 @@ struct CardDetailView: View {
                     .foregroundStyle(Theme.Colors.amber)
                     .fontWeight(.semibold)
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Section("Receipt") {
+                        Button {
+                            saveReceipt(includeImage: true)
+                        } label: {
+                            Label("Save with card image", systemImage: "photo.fill.on.rectangle.fill")
+                        }
+                        Button {
+                            saveReceipt(includeImage: false)
+                        } label: {
+                            Label("Save text only", systemImage: "doc.plaintext")
+                        }
+                    }
+                    Section("Status") {
+                        Button {
+                            status = "sold"
+                            save()
+                        } label: {
+                            Label("Mark as sold", systemImage: "tag.fill")
+                        }
+                        .disabled(status == "sold")
+                        Button {
+                            status = "traded"
+                            save()
+                        } label: {
+                            Label("Mark as traded", systemImage: "arrow.left.arrow.right")
+                        }
+                        .disabled(status == "traded")
+                    }
+                    Section {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Delete card", systemImage: "trash.fill")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(Theme.Colors.amber)
+                }
+            }
         }
+        .overlay(alignment: .top) { receiptToastView }
         .confirmationDialog("Delete this card?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
@@ -64,38 +118,63 @@ struct CardDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .onAppear { loadFromItem() }
+        .sheet(isPresented: $showSellSheet) {
+            // Reuses the existing SellSheet from InventoryRowComponents.swift.
+            // On confirm, flips the SAME LocalInventoryItem from bought/holding
+            // to sold — no duplicate row — and pops back so the user sees
+            // the updated stock count.
+            SellSheet(item: item) { price in
+                InventoryService.shared.markSold(item: item, price: price)
+                Task { await vm.load() }
+                showSellSheet = false
+                dismiss()
+            }
+            .presentationDetents([.medium])
+            .presentationBackground(Theme.Colors.bg)
+        }
+        .onAppear {
+            loadFromItem()
+            capturedImage = CardImageStore.load(item.capturedImagePath)
+        }
     }
 
     // MARK: - Sections
 
+    @ViewBuilder
     private var heroImage: some View {
-        Group {
-            if let url = item.cardImageUrl.flatMap(URL.init) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img): img.resizable().aspectRatio(contentMode: .fit)
-                    default: Theme.Colors.surface
-                    }
-                }
+        // Prefer the live camera capture saved at scan time. Stock art is
+        // the secondary fallback (only when no captured photo exists, e.g.
+        // legacy entries or manual-search additions). The captured image is
+        // loaded once into @State on appear so the disk-backed UIImage isn't
+        // fetched on every keystroke as the price fields update.
+        if let local = capturedImage {
+            Image(uiImage: local)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .frame(maxWidth: 200, maxHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
                 .shadow(color: .black.opacity(0.5), radius: 24, y: 12)
+        } else if let url = item.cardImageUrl.flatMap(URL.init) {
+            CachedAsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img): img.resizable().aspectRatio(contentMode: .fit)
+                default: Theme.Colors.surface
+                }
             }
+            .frame(maxWidth: 200, maxHeight: 280)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .shadow(color: .black.opacity(0.5), radius: 24, y: 12)
         }
     }
 
     private var titleBlock: some View {
         VStack(spacing: Theme.Spacing.xs) {
+            // Card name only — the scanner identifies the name, not the
+            // specific printing/set, so we don't surface the API's guess.
             Text(item.cardName ?? item.cardId)
                 .font(Theme.Typography.headline)
                 .foregroundStyle(Theme.Colors.textPrimary)
                 .multilineTextAlignment(.center)
-            if let set = extractSetName(from: item) {
-                Text(set)
-                    .font(Theme.Typography.body)
-                    .foregroundStyle(Theme.Colors.textSecondary)
-            }
             if let market = extractMarketPrice(from: item) {
                 Text("MARKET · " + String(format: "$%.2f", market))
                     .font(Theme.Typography.label)
@@ -104,6 +183,39 @@ struct CardDetailView: View {
                     .padding(.top, 4)
             }
         }
+    }
+
+    // MARK: - Sell CTA
+    //
+    // Big green button shown only when the card is still in stock (bought
+    // or holding). Opens SellSheet → user enters the sale price → the
+    // SAME inventory row flips status to "sold" and gains a salePrice.
+    // Stock count drops by 1, no duplicate row created.
+
+    private var sellCTA: some View {
+        Button {
+            showSellSheet = true
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "tag.fill")
+                    .font(.system(size: 16, weight: .heavy))
+                Text("SELL THIS CARD")
+                    .font(Theme.Typography.title)
+                    .tracking(2)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .opacity(0.6)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .padding(.horizontal, Theme.Spacing.lg)
+            .background(Theme.Colors.green)
+            .foregroundStyle(.black)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
+            .shadow(color: Theme.Colors.green.opacity(0.3), radius: 12, y: 4)
+        }
+        .buttonStyle(.plain)
     }
 
     private var statusPicker: some View {
@@ -194,22 +306,6 @@ struct CardDetailView: View {
         }
     }
 
-    private var deleteButton: some View {
-        Button(role: .destructive) {
-            showDeleteConfirm = true
-        } label: {
-            Label("DELETE CARD", systemImage: "trash.fill")
-                .font(Theme.Typography.label)
-                .tracking(2)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(Theme.Colors.redSoft)
-                .foregroundStyle(Theme.Colors.red)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
-        }
-        .padding(.top, Theme.Spacing.md)
-    }
-
     // MARK: - Helpers
 
     private func tint(for status: String) -> Color {
@@ -281,6 +377,58 @@ struct CardDetailView: View {
         paymentMethod = item.paymentMethod ?? ""
         counterparty = item.counterparty ?? ""
         notes = item.notes ?? ""
+    }
+
+    // MARK: - Receipt
+
+    @ViewBuilder
+    private var receiptToastView: some View {
+        if let toast = receiptToast {
+            let (label, icon, tint): (String, String, Color) = {
+                switch toast {
+                case .saved:        return ("RECEIPT SAVED TO PHOTOS", "checkmark.seal.fill", Theme.Colors.green)
+                case .failed(let m): return (m.uppercased(), "exclamationmark.triangle.fill", Theme.Colors.red)
+                }
+            }()
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .heavy))
+                Text(label)
+                    .font(Theme.Typography.label)
+                    .tracking(1.5)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.pill)
+                    .fill(Theme.Colors.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.pill)
+                            .stroke(tint, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    )
+            )
+            .foregroundStyle(tint)
+            .padding(.top, Theme.Spacing.sm)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private func saveReceipt(includeImage: Bool = true) {
+        Task { @MainActor in
+            do {
+                _ = try await ReceiptExporter.save(item: item, includeImage: includeImage)
+                withAnimation(.spring()) { receiptToast = .saved }
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { receiptToast = nil }
+            } catch {
+                withAnimation(.spring()) {
+                    receiptToast = .failed("Save failed")
+                }
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { receiptToast = nil }
+            }
+        }
     }
 
     private func save() {

@@ -72,8 +72,14 @@ struct StockRow: View {
 
     @ViewBuilder
     private var cardImage: some View {
-        if let url = item.cardImageUrl.flatMap(URL.init) {
-            AsyncImage(url: url) { phase in
+        if let local = CardImageStore.load(item.capturedImagePath) {
+            Image(uiImage: local)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 48, height: 66)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+        } else if let url = item.cardImageUrl.flatMap(URL.init) {
+            CachedAsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
                 default: Theme.Colors.surfaceHi

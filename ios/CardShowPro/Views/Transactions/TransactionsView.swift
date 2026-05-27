@@ -3,6 +3,10 @@ import SwiftUI
 /// Full activity feed — every buy, sell, and trade. Replaces the old Stock tab.
 /// Includes inline filter pills so the vendor can narrow down what they're looking at.
 struct TransactionsView: View {
+    /// Optional search text supplied by the caller (e.g. HomeView's search
+    /// bar). Applied once on appear.
+    var initialSearch: String = ""
+
     @State private var vm = InventoryViewModel()
     @State private var sellingItem: LocalInventoryItem? = nil
 
@@ -36,6 +40,10 @@ struct TransactionsView: View {
         .task {
             // Default to "all" rather than just bought
             if vm.statusFilter == "bought" { vm.statusFilter = nil }
+            // Apply caller-supplied search (e.g. HomeView's search bar).
+            if !initialSearch.isEmpty && vm.searchText.isEmpty {
+                vm.searchText = initialSearch
+            }
             await vm.load()
         }
     }

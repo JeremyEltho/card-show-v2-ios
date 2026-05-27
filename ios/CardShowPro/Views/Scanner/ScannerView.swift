@@ -3,12 +3,14 @@ import AVFoundation
 
 struct ScannerView: View {
     let logMode: LogMode
+    let receiptMode: ReceiptMode
     @State private var vm = ScannerViewModel()
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    init(logMode: LogMode = .buy) {
+    init(logMode: LogMode = .buy, receiptMode: ReceiptMode = .withReceipt) {
         self.logMode = logMode
+        self.receiptMode = receiptMode
     }
 
     var body: some View {
@@ -25,6 +27,7 @@ struct ScannerView: View {
             // Top brand bar
             VStack {
                 topBar
+                if let msg = vm.fastToast { fastToastBanner(msg) }
                 Spacer()
                 bottomHint
             }
@@ -56,6 +59,8 @@ struct ScannerView: View {
                     match: match,
                     logMode: logMode,
                     isAwaitingConfirmation: true,
+                    confirmLabelOverride: tradeSheetLabel,
+                    hidesPriceField: logMode == .trade,
                     onConfirm: { price, condition, status in
                         Task { await vm.confirmCard(match, price: price, condition: condition, status: status, sourceLocation: appState.activeShowName) }
                     },
@@ -64,6 +69,18 @@ struct ScannerView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackground(Theme.Colors.bg)
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { vm.scanState == .tradeReview },
+            set: { if !$0 { vm.cancelTrade() } }
+        )) {
+            TradeSummarySheet(
+                builder: vm.tradeBuilder,
+                onConfirm: { Task { await vm.commitTrade() } },
+                onCancel: { vm.cancelTrade() }
+            )
+            .presentationDetents([.large])
+            .presentationBackground(Theme.Colors.bg)
         }
         .sheet(isPresented: Binding(
             get: { if case .manualAssist = vm.scanState { return true }; return false },
@@ -79,9 +96,25 @@ struct ScannerView: View {
         }
         .task {
             vm.logMode = logMode
+            vm.receiptMode = receiptMode
             await vm.startCamera()
+            await vm.applyReceiptModeToScanner()
         }
         .onDisappear { Task { await vm.stopCamera() } }
+        // Pause the OCR pipeline whenever a modal sheet is up. Camera preview
+        // keeps streaming (cheap) but Vision + fuzzy match + overlay updates
+        // halt — stops them from contending with the keyboard when the user
+        // is typing in a price field.
+        .onChange(of: vm.scanState) { _, newState in
+            let shouldPause: Bool
+            switch newState {
+            case .awaitingConfirmation, .manualAssist, .tradeReview, .autoConfirmed:
+                shouldPause = true
+            case .idle, .scanning, .error:
+                shouldPause = false
+            }
+            Task { await vm.setScannerPaused(shouldPause) }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
     }
@@ -91,11 +124,13 @@ struct ScannerView: View {
     private var topBar: some View {
         HStack(spacing: Theme.Spacing.sm) {
             // Mode pill — biggest signal on the screen so the vendor knows what
-            // action will be taken when the scan auto-confirms.
+            // action will be taken when the scan auto-confirms. In trade mode,
+            // the pill flips to "TRADE · GIVE" then "TRADE · GET" as the
+            // builder fills.
             HStack(spacing: 6) {
                 Image(systemName: logMode.icon)
                     .font(.system(size: 14, weight: .bold))
-                Text("\(logMode.title) MODE")
+                Text(modePillText)
                     .font(Theme.Typography.label)
                     .tracking(2)
             }
@@ -119,6 +154,65 @@ struct ScannerView: View {
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.vertical, Theme.Spacing.sm)
         .background(.ultraThinMaterial)
+    }
+
+    // MARK: - Trade-aware helpers
+
+    /// What the mode pill says at the top of the camera view.
+    /// Standard modes show "{TITLE} MODE"; trade flips between GIVE/GET as
+    /// the two-card builder fills.
+    private var modePillText: String {
+        guard logMode == .trade else { return "\(logMode.title) MODE" }
+        switch vm.tradeBuilder.stage {
+        case .awaitingGive: return "TRADE · GIVE"
+        case .awaitingGet:  return "TRADE · GET"
+        case .review:       return "TRADE · REVIEW"
+        }
+    }
+
+    /// What the confirm button on the sheet says when we're in trade mode.
+    /// Nil means "use the default LOG <mode>" label.
+    private var tradeSheetLabel: String? {
+        guard logMode == .trade else { return nil }
+        switch vm.tradeBuilder.stage {
+        case .awaitingGive: return "NEXT"
+        case .awaitingGet:  return "REVIEW"
+        case .review:       return "REVIEW"
+        }
+    }
+
+    // MARK: - Fast-mode toast banner
+
+    /// Slim sticker-style banner shown after a fast-mode log. Reads as a
+    /// receipt thermal print: monospaced, dashed border, slight rotation so
+    /// it feels stamped on rather than rendered.
+    private func fastToastBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(Theme.Colors.green)
+            Text(message)
+                .font(Theme.Typography.priceSm)
+                .foregroundStyle(Theme.Colors.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Colors.surface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .stroke(Theme.Colors.green,
+                                style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                )
+        )
+        .rotationEffect(.degrees(-1.5))
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.top, Theme.Spacing.sm)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: message)
     }
 
     // MARK: - Bottom hint
@@ -172,6 +266,7 @@ struct ManualAssistView: View {
     @State private var searchText: String
     @State private var results: [CardSearchResult] = []
     @State private var isSearching = false
+    @State private var searchTask: Task<Void, Never>? = nil
     @Environment(\.dismiss) private var dismiss
 
     init(ocrHint: String, onSelect: @escaping (CardMatch) -> Void) {
@@ -214,7 +309,16 @@ struct ManualAssistView: View {
                         )
                         .padding(.horizontal, Theme.Spacing.md)
                         .onChange(of: searchText) { _, q in
-                            Task { await search(q) }
+                            // Debounce: cancel any in-flight search, then
+                            // wait briefly before firing the new one. Avoids
+                            // a network request per keystroke and the
+                            // last-response-wins race.
+                            searchTask?.cancel()
+                            searchTask = Task {
+                                try? await Task.sleep(for: .milliseconds(250))
+                                guard !Task.isCancelled else { return }
+                                await search(q)
+                            }
                         }
 
                     if isSearching {
@@ -237,10 +341,13 @@ struct ManualAssistView: View {
                                 } label: {
                                     HStack(spacing: Theme.Spacing.md) {
                                         if let url = card.imageUrlSm.flatMap(URL.init) {
-                                            AsyncImage(url: url) { img in
-                                                img.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Theme.Colors.surfaceHi
+                                            CachedAsyncImage(url: url) { phase in
+                                                switch phase {
+                                                case .success(let img):
+                                                    img.resizable().aspectRatio(contentMode: .fill)
+                                                default:
+                                                    Theme.Colors.surfaceHi
+                                                }
                                             }
                                             .frame(width: 40, height: 56)
                                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
@@ -285,7 +392,11 @@ struct ManualAssistView: View {
     private func search(_ query: String) async {
         guard query.count >= 2 else { results = []; return }
         isSearching = true
-        results = await PokemonTCGService.shared.search(query: query, limit: 10)
+        let fetched = await PokemonTCGService.shared.search(query: query, limit: 10)
+        // If this Task was cancelled while we were waiting for the network,
+        // don't clobber the visible results with stale data.
+        guard !Task.isCancelled else { return }
+        results = fetched
         isSearching = false
     }
 }

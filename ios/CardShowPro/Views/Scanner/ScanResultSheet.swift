@@ -7,6 +7,12 @@ struct ScanResultSheet: View {
     let match: CardMatch
     let logMode: LogMode
     let isAwaitingConfirmation: Bool
+    /// Override the confirm-button label. Trade mode passes "NEXT" for the
+    /// first scan and "REVIEW" for the second. Nil → use logMode.title.
+    var confirmLabelOverride: String? = nil
+    /// Trade mode hides the per-card price field because trades are
+    /// transacted as a pair with optional cash adjustment, not per card.
+    var hidesPriceField: Bool = false
     let onConfirm: (Double?, String, String) -> Void
     let onReject: () -> Void
 
@@ -50,27 +56,26 @@ struct ScanResultSheet: View {
                             .frame(width: 140, height: 196)
                             .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
 
-                        VStack(spacing: 4) {
-                            Text(match.name)
-                                .font(Theme.Typography.headline)
-                                .foregroundStyle(Theme.Colors.textPrimary)
-                                .multilineTextAlignment(.center)
-                            if let set = match.setName {
-                                Text(set)
-                                    .font(Theme.Typography.caption)
-                                    .foregroundStyle(Theme.Colors.textSecondary)
-                            }
-                        }
+                        // Card name only — we don't display the set because the
+                        // PokemonTCG lookup just picks the first match for the
+                        // name and the set is a guess (could be any printing).
+                        Text(match.name)
+                            .font(Theme.Typography.headline)
+                            .foregroundStyle(Theme.Colors.textPrimary)
+                            .multilineTextAlignment(.center)
 
-                        // Market price — big amber number
-                        VStack(spacing: 2) {
-                            Text("MARKET PRICE")
-                                .font(Theme.Typography.label)
-                                .tracking(1)
-                                .foregroundStyle(Theme.Colors.textTertiary)
-                            Text(displayPrice)
-                                .font(Theme.Typography.priceLg)
-                                .foregroundStyle(Theme.Colors.amber)
+                        // Market price — only shown when we actually have one
+                        // (fast mode skips the API lookup, so the field is nil).
+                        if match.marketPrice != nil {
+                            VStack(spacing: 2) {
+                                Text("MARKET PRICE")
+                                    .font(Theme.Typography.label)
+                                    .tracking(1)
+                                    .foregroundStyle(Theme.Colors.textTertiary)
+                                Text(displayPrice)
+                                    .font(Theme.Typography.priceLg)
+                                    .foregroundStyle(Theme.Colors.amber)
+                            }
                         }
                     }
 
@@ -93,35 +98,39 @@ struct ScanResultSheet: View {
                     )
                     .foregroundStyle(.black)
 
-                    // Price input — label adapts to the mode
-                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                        Text(priceLabel)
-                            .font(Theme.Typography.label)
-                            .tracking(1)
-                            .foregroundStyle(Theme.Colors.textTertiary)
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("$")
-                                .font(Theme.Typography.priceLg)
-                                .foregroundStyle(Theme.Colors.textSecondary)
-                            TextField("0.00", text: $customPrice)
-                                .keyboardType(.decimalPad)
-                                .font(Theme.Typography.priceLg)
-                                .foregroundStyle(logMode.tint)
+                    // Price input — hidden in trade mode (per-card price
+                    // doesn't apply; cash adjustment happens once on the
+                    // TradeSummarySheet).
+                    if !hidesPriceField {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            Text(priceLabel)
+                                .font(Theme.Typography.label)
+                                .tracking(1)
+                                .foregroundStyle(Theme.Colors.textTertiary)
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text("$")
+                                    .font(Theme.Typography.priceLg)
+                                    .foregroundStyle(Theme.Colors.textSecondary)
+                                TextField("0.00", text: $customPrice)
+                                    .keyboardType(.decimalPad)
+                                    .font(Theme.Typography.priceLg)
+                                    .foregroundStyle(logMode.tint)
+                            }
+                            .padding(Theme.Spacing.md)
+                            .background(
+                                RoundedRectangle(cornerRadius: Theme.Radius.md)
+                                    .fill(Theme.Colors.surface)
+                            )
                         }
-                        .padding(Theme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.md)
-                                .fill(Theme.Colors.surface)
-                        )
                     }
 
-                    // Log button — primary action
+                    // Confirm button — label overridable for the trade flow.
                     Button {
-                        let price = Double(customPrice) ?? match.marketPrice
+                        let price = hidesPriceField ? nil : (Double(customPrice) ?? match.marketPrice)
                         onConfirm(price, "near_mint", logMode.inventoryStatus)
                         dismiss()
                     } label: {
-                        Text("LOG \(logMode.title)")
+                        Text(confirmLabelOverride ?? "LOG \(logMode.title)")
                             .font(Theme.Typography.title)
                             .tracking(2)
                             .frame(maxWidth: .infinity)
@@ -155,8 +164,17 @@ struct ScanResultSheet: View {
 
     @ViewBuilder
     private var cardImage: some View {
-        if let urlStr = match.imageUrlSm, let url = URL(string: urlStr) {
-            AsyncImage(url: url) { phase in
+        // Prefer the live camera photo of the actual card the vendor is
+        // holding — same image that will land on the receipt. Falls back to
+        // pokemontcg.io stock art only when no capture is available (e.g.
+        // manual-search flow).
+        if let captured = match.capturedImage {
+            Image(uiImage: captured)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+        } else if let urlStr = match.imageUrlSm, let url = URL(string: urlStr) {
+            CachedAsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let img): img.resizable().aspectRatio(contentMode: .fit)
                 default: Theme.Colors.surface
