@@ -20,7 +20,10 @@ final class InventoryService {
 
     @discardableResult
     func add(card: CardMatch, purchasePrice: Double?, status: String,
-             condition: String, sourceLocation: String) -> LocalInventoryItem? {
+             condition: String, sourceLocation: String,
+             capturedImagePath: String? = nil,
+             tradeId: String? = nil,
+             notes: String? = nil) -> LocalInventoryItem? {
         guard let ctx = modelContext else { return nil }
         let item = LocalInventoryItem(
             cardId: card.cardId.isEmpty ? card.name.lowercased() : card.cardId,
@@ -33,7 +36,10 @@ final class InventoryService {
             salePrice: status == "sold" ? (purchasePrice ?? card.marketPrice) : nil,
             marketPrice: card.marketPrice,
             setName: card.setName,
+            notes: notes,
             sourceLocation: sourceLocation.isEmpty ? nil : sourceLocation,
+            capturedImagePath: capturedImagePath,
+            tradeId: tradeId,
             acquiredAt: .now
         )
         ctx.insert(item)
@@ -75,7 +81,21 @@ final class InventoryService {
 
     func delete(item: LocalInventoryItem) {
         guard let ctx = modelContext else { return }
+        CardImageStore.delete(item.capturedImagePath)
         ctx.delete(item)
+        try? ctx.save()
+    }
+
+    /// Bulk-delete every inventory item in a single save. Used by the
+    /// "Delete all inventory" action in Settings. Cheaper than looping
+    /// `delete(item:)` because it doesn't pay the save() round-trip per row.
+    func clearAll() {
+        guard let ctx = modelContext else { return }
+        let all = fetchAll()
+        for item in all {
+            CardImageStore.delete(item.capturedImagePath)
+            ctx.delete(item)
+        }
         try? ctx.save()
     }
 

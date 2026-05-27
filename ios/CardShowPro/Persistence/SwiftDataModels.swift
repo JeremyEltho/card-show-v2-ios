@@ -18,6 +18,14 @@ final class LocalInventoryItem {
     var sourceLocation: String?
     var paymentMethod: String?
     var counterparty: String?           // who I bought from / sold to
+    /// Relative filename of the camera-captured photo under Documents/card_images/.
+    /// Set at scan time. Used by the receipt exporter as the primary image
+    /// source — falls back to cardImageUrl only when this is missing.
+    var capturedImagePath: String?
+    /// Shared UUID linking the two sides of a single trade transaction.
+    /// Both LocalInventoryItem rows from one trade carry the same value.
+    /// nil for buys, sells, and any pre-trade-feature entries.
+    var tradeId: String?
     var acquiredAt: Date
     var syncedToServer: Bool
     var serverItemId: String?
@@ -38,6 +46,8 @@ final class LocalInventoryItem {
         sourceLocation: String? = nil,
         paymentMethod: String? = nil,
         counterparty: String? = nil,
+        capturedImagePath: String? = nil,
+        tradeId: String? = nil,
         acquiredAt: Date = .now,
         syncedToServer: Bool = false,
         serverItemId: String? = nil
@@ -59,6 +69,8 @@ final class LocalInventoryItem {
         self.sourceLocation = sourceLocation
         self.paymentMethod = paymentMethod
         self.counterparty = counterparty
+        self.capturedImagePath = capturedImagePath
+        self.tradeId = tradeId
         self.acquiredAt = acquiredAt
         self.syncedToServer = syncedToServer
         self.serverItemId = serverItemId

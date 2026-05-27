@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 struct Card: Codable, Identifiable {
     let id: String
@@ -57,6 +58,10 @@ struct CardMatch {
     var confidence: Float
     var marketPrice: Double?
     var pipeline: String
+    /// Live camera capture of the card at the moment of match. Set by
+    /// CardScannerService. nil if rendering failed or this is a manual-search
+    /// match (where there's no live frame).
+    var capturedImage: UIImage? = nil
 }
 
 struct CardSearchResult: Codable, Identifiable {
